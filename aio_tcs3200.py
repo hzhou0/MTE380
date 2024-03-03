@@ -1,9 +1,3 @@
-# tcs3200.py: a driver for the TCS3200 color sensor
-#
-# Copyright (c) U. Raich
-# Written for the course on the Internet of Things at the
-# University of Cape Coast, Ghana
-# The program is released under the MIT licence
 import rp2
 from machine import Pin, freq
 
@@ -34,9 +28,6 @@ class TCS3200(object):
     FREQ_12_KHZ = (0, 1)
     FREQ_120_KHZ = (1, 0)
     FREQ_600_KHZ = (1, 1)
-
-    # _REL_COMP = (161212, 168096, 233470)
-    REL_COMP = (1, 0.959047211, 0.690504133)
 
     def __init__(
         self,
@@ -72,10 +63,7 @@ class TCS3200(object):
             pull()
             # initialize scratch reg x to 0x1111
             mov(x, invert(null))
-            set(y, 31)
 
-            label("WAVE_START")
-            # wait on base pin to become high
             wait(1, pin, 0)
             # wait on base pin to become low (start of the square wave)
             wait(0, pin, 0)
@@ -87,7 +75,6 @@ class TCS3200(object):
             jmp(x_dec, "LOOP")
 
             label("RETURN")
-            jmp(y_dec, "WAVE_START")
             # Move x value into ISR.
             # The x value is the duration of the square wave in clock cycles (unsigned complement).
             mov(isr, invert(x))
@@ -102,6 +89,8 @@ class TCS3200(object):
             jmp_pin=self._out,
         )
         self._sm.active(1)
+
+        self._rgb_moving_average = self.rgb_raw()
 
     # sets the filters
     @property
@@ -130,16 +119,7 @@ class TCS3200(object):
     def freq(self, filter: tuple[int, int]) -> int:
         self.filter = filter
         self._sm.put(0)
-        return int(freq() / (self._sm.get() / 32))
-
-    @micropython.native
-    def rgb(self) -> tuple[int, int, int]:
-        rgb_raw = self.rgb_raw()
-
-        return tuple(
-            int(v * 255 * self.REL_COMP[i] / max(rgb_raw))
-            for i, v in enumerate(rgb_raw)
-        )
+        return freq() // self._sm.get()
 
     @micropython.native
     def rgb_raw(self) -> tuple[int, int, int]:
@@ -148,3 +128,12 @@ class TCS3200(object):
             self.freq(self.GREEN),
             self.freq(self.BLUE),
         )
+
+    @micropython.native
+    def rgb_lpf(self):
+        raw = self.rgb_raw()
+        self._rgb_moving_average = tuple(
+            int(0.25 * raw[i] + 0.75 * v)
+            for i, v in enumerate(self._rgb_moving_average)
+        )
+        return self._rgb_moving_average
