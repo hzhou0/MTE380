@@ -28,6 +28,7 @@ class TCS3200(object):
     FREQ_12_KHZ = (0, 1)
     FREQ_120_KHZ = (1, 0)
     FREQ_600_KHZ = (1, 1)
+    CLEAR_BASELINE = 1000000
 
     def __init__(
         self,
@@ -90,6 +91,10 @@ class TCS3200(object):
         )
         self._sm.active(1)
 
+        self.filter = self.CLEAR
+        self._sm.put(0)
+        self._calib_factor = self.CLEAR_BASELINE / (freq() // self._sm.get())
+
         self._rgb_moving_average = self.rgb_raw()
 
     # sets the filters
@@ -119,7 +124,7 @@ class TCS3200(object):
     def freq(self, filter: tuple[int, int]) -> int:
         self.filter = filter
         self._sm.put(0)
-        return freq() // self._sm.get()
+        return int(freq() // self._sm.get() * self._calib_factor)
 
     @micropython.native
     def rgb_raw(self) -> tuple[int, int, int]:
