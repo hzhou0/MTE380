@@ -2,6 +2,10 @@ from machine import PWM, Pin
 from micropython import const
 
 
+def constrain(val, a, b):
+    return min(max(val, min(a, b)), b)
+
+
 class Servo:
     __servo_pwm_freq = 50
     __min_u16_duty = const(1640 - 2)  # offset for correction

@@ -1,3 +1,4 @@
+import micropython
 import rp2
 from machine import Pin, freq
 
@@ -28,7 +29,6 @@ class TCS3200(object):
     FREQ_12_KHZ = (0, 1)
     FREQ_120_KHZ = (1, 0)
     FREQ_600_KHZ = (1, 1)
-    CLEAR_BASELINE = 1000000
 
     def __init__(
         self,
@@ -91,19 +91,13 @@ class TCS3200(object):
         )
         self._sm.active(1)
 
-        self.filter = self.CLEAR
-        self._sm.put(0)
-        self._calib_factor = self.CLEAR_BASELINE / (freq() // self._sm.get())
-
-        self._rgb_moving_average = self.rgb_raw()
-
     # sets the filters
     @property
-    def filter(self) -> tuple[int, int]:
+    def _filter(self) -> tuple[int, int]:
         return self._s2.value(), self._s3.value()
 
-    @filter.setter
-    def filter(self, x: tuple[int, int]):
+    @_filter.setter
+    def _filter(self, x: tuple[int, int]):
         self._s2.value(x[0])
         self._s3.value(x[1])
 
@@ -121,24 +115,35 @@ class TCS3200(object):
         self._s1.value(x[1])
 
     @micropython.native
-    def freq(self, filter: tuple[int, int]) -> int:
-        self.filter = filter
+    def clocks(self, filter: tuple[int, int]) -> int:
+        self._filter = filter
         self._sm.put(0)
-        return int(freq() // self._sm.get() * self._calib_factor)
+        return self._sm.get()
 
     @micropython.native
-    def rgb_raw(self) -> tuple[int, int, int]:
+    def freq(self, filter: tuple[int, int]) -> int:
+        return freq() // self.clocks(filter)
+
+    @micropython.native
+    def val(self, filter: tuple[int, int], n: int = 5) -> float:
+        acc = 0
+        for _ in range(n):
+            acc += self.clocks(self.CLEAR) / self.clocks(filter)
+        return acc / n
+
+    @micropython.native
+    def rgb(self) -> tuple[float, float, float]:
+        return (
+            self.val(self.RED),
+            self.val(self.GREEN),
+            self.val(self.BLUE),
+        )
+
+    @micropython.native
+    def rgba_freq(self) -> tuple[int, int, int, int]:
         return (
             self.freq(self.RED),
             self.freq(self.GREEN),
             self.freq(self.BLUE),
+            self.freq(self.CLEAR),
         )
-
-    @micropython.native
-    def rgb_lpf(self):
-        raw = self.rgb_raw()
-        self._rgb_moving_average = tuple(
-            int(0.25 * raw[i] + 0.75 * v)
-            for i, v in enumerate(self._rgb_moving_average)
-        )
-        return self._rgb_moving_average
