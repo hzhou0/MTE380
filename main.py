@@ -14,18 +14,18 @@ left_drive = L298(en=16, in1=17, in2=18)
 right_drive = L298(en=15, in1=14, in2=13)
 max_speed = const(65535)
 half_speed = const(max_speed // 2)
-quarter_speed = const(max_speed // 3)
+min_speed = const(max_speed // 3)
 
 
 def demo():
     time.sleep(5)
 
-    left_drive.forward(quarter_speed)
-    right_drive.forward(quarter_speed)
+    left_drive.forward(min_speed)
+    right_drive.forward(min_speed)
     time.sleep(2)
 
-    left_drive.reverse(quarter_speed)
-    right_drive.reverse(quarter_speed)
+    left_drive.reverse(min_speed)
+    right_drive.reverse(min_speed)
     time.sleep(2)
 
     left_drive.brake()
@@ -33,7 +33,7 @@ def demo():
     time.sleep(1)
 
     left_drive.forward(half_speed)
-    right_drive.forward(quarter_speed)
+    right_drive.forward(min_speed)
     time.sleep(2)
 
     left_drive.brake()
@@ -64,8 +64,8 @@ def drive_past_start_line():
 
     r_amb = (r_init_max + r_init_min) / 2
     print(f"r_amb: {r_amb}")
-    left_drive.forward(quarter_speed)
-    right_drive.forward(quarter_speed)
+    left_drive.forward(min_speed)
+    right_drive.forward(min_speed)
 
     while True:
         r = max(left_cls.val(TCS3200.RED), right_cls.val(TCS3200.RED))
@@ -92,24 +92,34 @@ L = micropython.const(0.200)
 V_MAX_MOTOR = micropython.const(1.3823 * 0.25)
 W_MAX_MOTOR = micropython.const(2 * V_MAX_MOTOR / L)
 K_P = micropython.const(140 * 1.2)
-K_D = micropython.const(20 * 0)
+K_D = micropython.const(20)
 
 
-def path_follow(r_red_val, l_red_val, gain, last_d, DEBUG=False):
+def path_follow(
+    r_red_val: float,
+    l_red_val: float,
+    gain: float,
+    last_d: float | None,
+    last_tick_us: int | None,
+    debug=False,
+):
+    tick_us = time.ticks_us()
     d = (r_red_val - l_red_val) / gain  # displacement from line in meters
-    if last_d is None:
+    if last_d is None or last_tick_us is None:
         dd = 0
+        seconds_elapsed = 0
     else:
         dd = d - last_d
-    w = -constrain(K_P * d + K_D * dd, -W_MAX_MOTOR, W_MAX_MOTOR)
+        seconds_elapsed = time.ticks_diff(tick_us, last_tick_us) / 1e-6
+    w = -constrain(K_P * d + K_D * dd * seconds_elapsed, -W_MAX_MOTOR, W_MAX_MOTOR)
     if w > 0:
         v_right = V_MAX_MOTOR
         v_left = v_right - w * L
     else:
         v_left = V_MAX_MOTOR
         v_right = v_left + w * L
-    pwm_right = int(v_right / V_MAX_MOTOR * quarter_speed)
-    pwm_left = int(v_left / V_MAX_MOTOR * quarter_speed)
+    pwm_right = int(v_right / V_MAX_MOTOR * min_speed)
+    pwm_left = int(v_left / V_MAX_MOTOR * min_speed)
     if v_right > 0:
         right_drive.forward(pwm_right)
     else:
@@ -118,14 +128,13 @@ def path_follow(r_red_val, l_red_val, gain, last_d, DEBUG=False):
         left_drive.forward(pwm_left)
     else:
         left_drive.reverse(-pwm_left)
-    if DEBUG:
+    if debug:
         print("d:", d)
         print("dd:", dd)
         print("w:", w)
         print("v(r,l):", v_right, v_left)
         print("pwm(r,l):", pwm_right, pwm_left)
-        time.sleep_ms(1)
-    return d
+    return tick_us, d
 
 
 def is_off_path(r_red_val, l_red_val, r_amb, noise) -> bool:
@@ -134,21 +143,19 @@ def is_off_path(r_red_val, l_red_val, r_amb, noise) -> bool:
     return False
 
 
-DEBUG = False
+DEBUG: bool = False
 if __name__ == "__main__":
     # GAIN, RED_MAX, RED_AMB, NOISE = 5.3, 0.5, 0.3, 0.001
     time.sleep(5)
     GAIN, RED_MAX, RED_AMB, NOISE = drive_past_start_line()
-    last_d = None
+    d = tick_us = None
     while True:
         red_r, red_l = right_cls.val(TCS3200.RED), left_cls.val(TCS3200.RED)
+        tick_us, d = path_follow(red_r, red_l, GAIN, d, tick_us, DEBUG)
         if is_off_path(red_r, red_l, RED_AMB, NOISE):
             left_drive.brake()
             right_drive.brake()
-            time.sleep_ms(1000)
-            continue
-        last_d = path_follow(red_r, red_l, GAIN, last_d, DEBUG)
-        time.sleep_ms(1)
+            break
 
 
 while True:
